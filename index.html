@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard IoT Monitoring</title>
+
+<style>
+body { font-family: Arial, sans-serif; max-width: 1000px; margin: auto; }
+h1, h2 { text-align: center; }
+
+.card {
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 10px;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+}
+
+.value { font-size: 2.2rem; font-weight: bold; }
+
+.normal { background: #d4edda; color: #155724; }
+.warning { background: #fff3cd; color: #856404; }
+.danger { background: #f8d7da; color: #721c24; }
+
+/* NOTIFIKASI */
+#notif {
+    display: none;
+    background: #007bff;
+    color: white;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+    margin-bottom: 15px;
+    animation: fade 3s forwards;
+}
+
+@keyframes fade {
+    0% { opacity: 1; }
+    80% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+th, td {
+    border: 1px solid #ccc;
+    padding: 8px;
+    text-align: center;
+}
+th { background: #f2f2f2; }
+</style>
+</head>
+
+<body>
+
+<h1>📡 Dashboard IoT Monitoring</h1>
+
+<!-- NOTIFIKASI DATA -->
+<div id="notif">📡 Data baru diterima, dashboard diperbarui</div>
+
+<!-- STATUS SUHU -->
+<div id="alert" class="card normal">
+    Status Suhu: Normal
+</div>
+
+<!-- NILAI SENSOR -->
+<div class="card">
+    <b>Suhu (°C)</b>
+    <div id="tempValue" class="value">--</div>
+</div>
+
+<div class="card">
+    <b>Kelembaban (%)</b>
+    <div id="humValue" class="value">--</div>
+</div>
+
+<h2>📊 Grafik Monitoring</h2>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<canvas id="chartTemp"></canvas>
+<canvas id="chartHum"></canvas>
+
+<h2>🗂️ Archive Data IoT</h2>
+<table>
+<thead>
+<tr>
+    <th>No</th>
+    <th>Waktu</th>
+    <th>Suhu (°C)</th>
+    <th>Kelembaban (%)</th>
+    <th>Status</th>
+</tr>
+</thead>
+<tbody id="archiveTable"></tbody>
+</table>
+
+<script>
+// ================= KONFIG =================
+const channelID = "3205447";
+const readAPIKey = "ISI_READ_API_KEY_KAMU";
+
+const WARNING_TEMP = 30;
+const DANGER_TEMP = 35;
+// ==========================================
+
+const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${readAPIKey}&results=30`;
+
+let tempChart, humChart;
+let lastTimestamp = null;
+
+function tampilNotif() {
+    const notif = document.getElementById("notif");
+    notif.style.display = "block";
+    notif.style.opacity = "1";
+
+    setTimeout(() => {
+        notif.style.display = "none";
+    }, 3000);
+}
+
+function statusSuhu(t) {
+    if (t > DANGER_TEMP) return "Bahaya";
+    if (t >= WARNING_TEMP) return "Waspada";
+    return "Normal";
+}
+
+function cekBahaya(t) {
+    const alert = document.getElementById("alert");
+    if (t > DANGER_TEMP) {
+        alert.className = "card danger";
+        alert.innerHTML = "🔥 BAHAYA! Suhu Tinggi";
+    } else if (t >= WARNING_TEMP) {
+        alert.className = "card warning";
+        alert.innerHTML = "⚠️ WASPADA! Suhu Meningkat";
+    } else {
+        alert.className = "card normal";
+        alert.innerHTML = "✅ Suhu Normal";
+    }
+}
+
+async function fetchData() {
+    const res = await fetch(url);
+    const data = await res.json();
+    const feeds = data.feeds;
+
+    if (feeds.length === 0) return;
+
+    const lastFeed = feeds[feeds.length - 1];
+    const currentTimestamp = lastFeed.created_at;
+
+    // 🔔 CEK DATA BARU
+    if (lastTimestamp && currentTimestamp !== lastTimestamp) {
+        tampilNotif();
+    }
+    lastTimestamp = currentTimestamp;
+
+    const suhu = feeds.map(f => parseFloat(f.field2));
+    const hum = feeds.map(f => parseFloat(f.field1));
+    const waktu = feeds.map(f => new Date(f.created_at).toLocaleTimeString());
+
+    const suhuLast = suhu.at(-1);
+    const humLast = hum.at(-1);
+
+    document.getElementById("tempValue").textContent = suhuLast;
+    document.getElementById("humValue").textContent = humLast;
+
+    cekBahaya(suhuLast);
+
+    tempChart.data.labels = waktu;
+    tempChart.data.datasets[0].data = suhu;
+    tempChart.update();
+
+    humChart.data.labels = waktu;
+    humChart.data.datasets[0].data = hum;
+    humChart.update();
+
+    // Archive
+    const table = document.getElementById("archiveTable");
+    table.innerHTML = "";
+    feeds.forEach((f, i) => {
+        table.innerHTML += `
+        <tr>
+            <td>${i+1}</td>
+            <td>${new Date(f.created_at).toLocaleString()}</td>
+            <td>${f.field2}</td>
+            <td>${f.field1}</td>
+            <td>${statusSuhu(parseFloat(f.field2))}</td>
+        </tr>`;
+    });
+}
+
+function initChart() {
+    tempChart = new Chart(chartTemp, {
+        type: "line",
+        data: { labels: [], datasets: [{ label: "Suhu (°C)", data: [] }] }
+    });
+    humChart = new Chart(chartHum, {
+        type: "line",
+        data: { labels: [], datasets: [{ label: "Kelembaban (%)", data: [] }] }
+    });
+}
+
+initChart();
+fetchData();
+setInterval(fetchData, 15000);
+</script>
+
+</body>
+</html>
